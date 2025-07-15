@@ -4,10 +4,10 @@ FROM golang:1.24-alpine AS builder
 WORKDIR /app
 
 # Copy go mod files
-COPY go.mod go.sum ./
+COPY go.mod ./
 
 # Download dependencies
-RUN go mod download
+RUN go mod tidy && go mod download
 
 # Copy source code
 COPY . .
