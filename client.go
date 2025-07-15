@@ -17,7 +17,6 @@ type Client struct {
 	wg         sync.WaitGroup
 	shutdown   chan struct{}
 	connCount  int32
-	mu         sync.Mutex
 }
 
 // NewClient creates a new client instance

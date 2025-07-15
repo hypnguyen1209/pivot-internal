@@ -8,6 +8,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Server represents the pivot server
@@ -31,6 +32,12 @@ func NewServer(key, listenAddr string) *Server {
 
 // Start starts the server
 func (s *Server) Start(ctx context.Context) error {
+	// Check if this is an agent connection mode (indicated by no colon in listenAddr for port)
+	if s.isAgentMode() {
+		return s.startAgentMode(ctx)
+	}
+
+	// Original listen mode
 	listener, err := net.Listen("tcp", s.listenAddr)
 	if err != nil {
 		return err
@@ -77,6 +84,120 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 }
 
+// isAgentMode determines if server should connect to agent
+func (s *Server) isAgentMode() bool {
+	// If listenAddr doesn't start with ":", it's an agent address
+	return s.listenAddr != "" && s.listenAddr[0] != ':'
+}
+
+// startAgentMode connects to agent server and starts local SOCKS5 server for agent connections
+func (s *Server) startAgentMode(ctx context.Context) error {
+	agentAddr := s.listenAddr // Using listenAddr field to store agent address
+
+	log.Printf("Server connecting to agent at %s", agentAddr)
+
+	// Start local SOCKS5 server on port 9999 for agent connections only
+	go func() {
+		listener, err := net.Listen("tcp", ":9999")
+		if err != nil {
+			log.Printf("Failed to start local SOCKS5 server: %v", err)
+			return
+		}
+		defer listener.Close()
+
+		log.Printf("Started local SOCKS5 server on :9999 for agent connections")
+
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+
+			s.wg.Add(1)
+			go func(conn net.Conn) {
+				defer s.wg.Done()
+				defer conn.Close()
+
+				connID := atomic.AddInt32(&s.connCount, 1)
+				log.Printf("Local SOCKS5 connection #%d from agent", connID)
+
+				// Create encrypted connection
+				rc4Conn, err := NewRC4Conn(conn, s.key)
+				if err != nil {
+					log.Printf("Connection #%d: Failed to create RC4 connection: %v", connID, err)
+					return
+				}
+
+				// Handle SOCKS5 protocol
+				s.handleSOCKS5(rc4Conn, connID)
+			}(conn)
+		}
+	}()
+
+	// Keep control connection to agent alive
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-s.shutdown:
+			return nil
+		default:
+		}
+
+		// Connect to agent
+		conn, err := net.Dial("tcp", agentAddr)
+		if err != nil {
+			log.Printf("Failed to connect to agent: %v, retrying in 5 seconds...", err)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-s.shutdown:
+				return nil
+			case <-time.After(5 * time.Second):
+				continue
+			}
+		}
+
+		log.Printf("Connected to agent server at %s", agentAddr)
+
+		// Create encrypted connection to agent
+		rc4Conn, err := NewRC4Conn(conn, s.key)
+		if err != nil {
+			log.Printf("Failed to create RC4 connection: %v", err)
+			conn.Close()
+			continue
+		}
+
+		log.Printf("Established encrypted control connection to agent")
+
+		// Keep the control connection alive
+		buffer := make([]byte, 1)
+		for {
+			select {
+			case <-ctx.Done():
+				rc4Conn.Close()
+				return ctx.Err()
+			case <-s.shutdown:
+				rc4Conn.Close()
+				return nil
+			default:
+			}
+
+			// Keep connection alive with periodic reads
+			rc4Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+			_, err := rc4Conn.Read(buffer)
+			if err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					continue
+				}
+				log.Printf("Control connection to agent lost: %v, reconnecting...", err)
+				rc4Conn.Close()
+				break
+			}
+		}
+	}
+}
+
 func (s *Server) handleClient(clientConn net.Conn) {
 	defer clientConn.Close()
 
@@ -103,7 +224,7 @@ func (s *Server) handleSOCKS5(conn net.Conn, connID int32) {
 	}
 
 	// Step 2: Handle CONNECT request
-	targetConn, err := s.handleSOCKS5Connect(conn, connID)
+	targetConn, err := s.handleSOCKS5Connect(conn)
 	if err != nil {
 		log.Printf("Connection #%d: SOCKS5 connect error: %v", connID, err)
 		return
@@ -137,7 +258,7 @@ func (s *Server) handleSOCKS5Auth(conn net.Conn) error {
 	return err
 }
 
-func (s *Server) handleSOCKS5Connect(conn net.Conn, connID int32) (net.Conn, error) {
+func (s *Server) handleSOCKS5Connect(conn net.Conn) (net.Conn, error) {
 	// Read CONNECT request header
 	buf := make([]byte, 4)
 	if _, err := io.ReadFull(conn, buf); err != nil {
