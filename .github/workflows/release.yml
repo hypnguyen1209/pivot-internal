@@ -75,117 +75,47 @@ jobs:
         sha256sum * > checksums.txt
         cat checksums.txt
     
-    - name: Create release notes
-      id: release_notes
-      run: |
-        cat > release_notes.md << 'EOF'
-        ## Pivot Internal Tool Release
-        
-        ### Features
-        - SOCKS5 proxy with RC4 encryption
-        - Multiple concurrent clients support
-        - Cross-platform compatibility
-        - Connection tracking and logging
-        - Graceful shutdown handling
-        
-        ### Binaries
-        This release includes binaries for:
-        - **Windows**: amd64, 386
-        - **macOS**: amd64 (Intel), arm64 (Apple Silicon)
-        - **Linux**: amd64, arm64
-        
-        ### Usage
-        1. Download the appropriate binary for your platform
-        2. Make it executable (Linux/macOS): `chmod +x pivot-internal-*`
-        3. Run server: `./pivot-internal server -key secret -l :1080`
-        4. Run client: `./pivot-internal client -key secret -r server:1080 -l :1081`
-        
-        ### Security Notes
-        - Use strong encryption keys
-        - For authorized penetration testing only
-        - Verify checksums before use
-        
-        See the [README](https://github.com/${{ github.repository }}/blob/main/README.md) for detailed usage instructions.
-        EOF
-    
     - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
+      uses: softprops/action-gh-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
-        body_path: release_notes.md
+        name: Release ${{ github.ref_name }}
+        body: |
+          ## Pivot Internal Tool Release
+          
+          ### Features
+          - SOCKS5 proxy with RC4 encryption
+          - Multiple concurrent clients support
+          - Cross-platform compatibility
+          - Connection tracking and logging
+          - Graceful shutdown handling
+          
+          ### Binaries
+          This release includes binaries for:
+          - **Windows**: amd64, 386
+          - **macOS**: amd64 (Intel), arm64 (Apple Silicon)
+          - **Linux**: amd64, arm64
+          
+          ### Usage
+          1. Download the appropriate binary for your platform
+          2. Make it executable (Linux/macOS): `chmod +x pivot-internal-*`
+          3. Run server: `./pivot-internal server -key secret -l :1080`
+          4. Run client: `./pivot-internal client -key secret -r server:1080 -l :1081`
+          
+          ### Security Notes
+          - Use strong encryption keys
+          - For authorized penetration testing only
+          - Verify checksums before use
+          
+          See the [README](https://github.com/${{ github.repository }}/blob/main/README.md) for detailed usage instructions.
+        files: |
+          build/pivot-internal-windows-amd64.exe
+          build/pivot-internal-windows-386.exe
+          build/pivot-internal-darwin-amd64
+          build/pivot-internal-darwin-arm64
+          build/pivot-internal-linux-amd64
+          build/pivot-internal-linux-arm64
+          build/checksums.txt
         draft: false
         prerelease: false
-    
-    - name: Upload Windows amd64
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./build/pivot-internal-windows-amd64.exe
-        asset_name: pivot-internal-windows-amd64.exe
-        asset_content_type: application/octet-stream
-    
-    - name: Upload Windows 386
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./build/pivot-internal-windows-386.exe
-        asset_name: pivot-internal-windows-386.exe
-        asset_content_type: application/octet-stream
-    
-    - name: Upload macOS amd64
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./build/pivot-internal-darwin-amd64
-        asset_name: pivot-internal-darwin-amd64
-        asset_content_type: application/octet-stream
-    
-    - name: Upload macOS arm64
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./build/pivot-internal-darwin-arm64
-        asset_name: pivot-internal-darwin-arm64
-        asset_content_type: application/octet-stream
-    
-    - name: Upload Linux amd64
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./build/pivot-internal-linux-amd64
-        asset_name: pivot-internal-linux-amd64
-        asset_content_type: application/octet-stream
-    
-    - name: Upload Linux arm64
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./build/pivot-internal-linux-arm64
-        asset_name: pivot-internal-linux-arm64
-        asset_content_type: application/octet-stream
-    
-    - name: Upload checksums
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./build/checksums.txt
-        asset_name: checksums.txt
-        asset_content_type: text/plain
